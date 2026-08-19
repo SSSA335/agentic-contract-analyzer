@@ -1,7 +1,12 @@
+# -*- coding: utf-8 -*-
+import os
 import uuid
 from qdrant_client import QdrantClient, models
 
-qdrant = QdrantClient(host="qdrant", port=6333)
+QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None
+
+qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
 COLLECTION_NAME = "contract_clauses"
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"

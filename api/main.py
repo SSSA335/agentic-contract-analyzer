@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import uuid
 import pika
 import redis
@@ -16,13 +17,17 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-resource = Resource(attributes={"service.name": "contract-analyzer-api"})
-provider = TracerProvider(resource=resource)
-provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint="http://jaeger:4317", insecure=True)))
-trace.set_tracer_provider(provider)
+# Tracing is optional in the cloud (no Jaeger there) - only enable if JAEGER_ENDPOINT is set
+JAEGER_ENDPOINT = os.getenv("JAEGER_ENDPOINT")
+if JAEGER_ENDPOINT:
+    resource = Resource(attributes={"service.name": "contract-analyzer-api"})
+    provider = TracerProvider(resource=resource)
+    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=JAEGER_ENDPOINT, insecure=True)))
+    trace.set_tracer_provider(provider)
 
 app = FastAPI(title="Agentic Contract Analyzer API")
-FastAPIInstrumentor.instrument_app(app)
+if JAEGER_ENDPOINT:
+    FastAPIInstrumentor.instrument_app(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,7 +36,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-redis_client = redis.Redis(host="redis", port=6379, decode_responses=True)
+RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
+
+redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 
 
 class DecisionRequest(BaseModel):
@@ -49,7 +57,7 @@ def extract_text(filename: str, content: bytes) -> str:
 
 
 def publish_to_queue(job_id: str, contract_text: str):
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
+    connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
     channel = connection.channel()
     channel.queue_declare(queue="contract_analysis")
 
@@ -59,7 +67,7 @@ def publish_to_queue(job_id: str, contract_text: str):
 
 
 def publish_decision(job_id: str, decision: str):
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
+    connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
     channel = connection.channel()
     channel.queue_declare(queue="human_decisions")
 

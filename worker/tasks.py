@@ -1,8 +1,11 @@
 import os
 import json
+import threading
 import time
 import pika
 import redis
+import uvicorn
+from fastapi import FastAPI
 from agents import run_clause_extractor, run_risk_analyzer, run_summarizer
 from memory import store_clauses, find_similar_clauses
 
@@ -12,19 +15,35 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 
-resource = Resource(attributes={"service.name": "contract-analyzer-worker"})
-provider = TracerProvider(resource=resource)
-provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint="http://jaeger:4317", insecure=True)))
-trace.set_tracer_provider(provider)
+RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
+JAEGER_ENDPOINT = os.getenv("JAEGER_ENDPOINT")
+
+# Tracing is optional in the cloud (no Jaeger there) - only enable if JAEGER_ENDPOINT is set
+if JAEGER_ENDPOINT:
+    resource = Resource(attributes={"service.name": "contract-analyzer-worker"})
+    provider = TracerProvider(resource=resource)
+    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=JAEGER_ENDPOINT, insecure=True)))
+    trace.set_tracer_provider(provider)
+
 tracer = trace.get_tracer(__name__)
 
-redis_client = redis.Redis(host="redis", port=6379, decode_responses=True)
+redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+
+# Tiny HTTP app just so Render treats this as a normal (free) Web Service.
+# The real work happens in the background thread started in __main__ below.
+health_app = FastAPI()
+
+
+@health_app.get("/health")
+def health():
+    return {"status": "ok", "message": "Worker is running"}
 
 
 def get_connection(max_retries=10, delay=3):
     for attempt in range(1, max_retries + 1):
         try:
-            return pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
+            return pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
         except pika.exceptions.AMQPConnectionError:
             print(f"[Worker] RabbitMQ not ready yet (attempt {attempt}/{max_retries}), retrying in {delay}s...")
             time.sleep(delay)
@@ -130,4 +149,11 @@ def consume_queue():
 
 
 if __name__ == "__main__":
-    consume_queue()
+    # Run the RabbitMQ consumer loop in the background...
+    consumer_thread = threading.Thread(target=consume_queue, daemon=True)
+    consumer_thread.start()
+
+    # ...and expose a tiny HTTP server on top, so Render (or any platform that
+    # only offers free "Web Services") is happy this process listens on a port.
+    port = int(os.getenv("PORT", 8001))
+    uvicorn.run(health_app, host="0.0.0.0", port=port)
