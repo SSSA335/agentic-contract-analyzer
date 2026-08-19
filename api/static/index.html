@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Contract Analyzer</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e38;
+    --text: #e6e8ec;
+    --muted: #8b909c;
+    --accent: #4f8cff;
+    --green: #3ecf8e;
+    --red: #ff5c6c;
+    --amber: #f5a623;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+  .app { width: 100%; max-width: 760px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-bottom: 28px; font-size: 14px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  input[type="file"] {
+    color: var(--text);
+    flex: 1;
+    min-width: 200px;
+  }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 18px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:hover { opacity: 0.9; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.approve { background: var(--green); }
+  button.reject { background: var(--red); }
+  button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge.queued, .badge.processing { background: rgba(79,140,255,0.15); color: var(--accent); }
+  .badge.pending_human_review { background: rgba(245,166,35,0.15); color: var(--amber); }
+  .badge.completed { background: rgba(62,207,142,0.15); color: var(--green); }
+  .badge.rejected { background: rgba(255,92,108,0.15); color: var(--red); }
+  .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 18px 0 8px; }
+  .clause-list { list-style: none; padding: 0; margin: 0; }
+  .clause-list li {
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .risk-item {
+    padding: 12px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    border-left: 3px solid var(--border);
+    background: rgba(255,255,255,0.03);
+  }
+  .risk-item.high { border-left-color: var(--red); }
+  .risk-item.medium { border-left-color: var(--amber); }
+  .risk-item.low { border-left-color: var(--green); }
+  .risk-level {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    display: inline-block;
+  }
+  .risk-level.high { color: var(--red); }
+  .risk-level.medium { color: var(--amber); }
+  .risk-level.low { color: var(--green); }
+  .risk-explanation { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .summary-text { font-size: 15px; line-height: 1.6; }
+  .job-id { font-family: monospace; font-size: 12px; color: var(--muted); }
+  .hidden { display: none !important; }
+  .spinner {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error-box {
+    background: rgba(255,92,108,0.1);
+    border: 1px solid var(--red);
+    color: var(--red);
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>Agentic Contract Analyzer</h1>
+  <div class="subtitle">Upload a contract (.pdf or .txt) to extract clauses, assess risk, and get a plain-language summary.</div>
+
+  <div class="card" id="upload-card">
+    <div class="row">
+      <input type="file" id="file-input" accept=".pdf,.txt">
+      <button id="analyze-btn">Analyze Contract</button>
+    </div>
+    <div id="upload-error" class="error-box hidden" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card hidden" id="status-card">
+    <div class="row" style="justify-content: space-between;">
+      <div>
+        <span id="status-badge" class="badge queued">queued</span>
+        <span class="job-id" id="job-id-label"></span>
+      </div>
+      <button class="secondary" id="reset-btn">Analyze another</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="review-card">
+    <div class="section-title">Extracted Clauses</div>
+    <ul class="clause-list" id="clauses-list"></ul>
+
+    <div class="section-title">Identified Risks</div>
+    <div id="risks-list"></div>
+
+    <div class="row" style="margin-top: 18px;">
+      <button class="approve" id="approve-btn">Approve & Continue</button>
+      <button class="reject" id="reject-btn">Reject</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="result-card">
+    <div class="section-title">Summary</div>
+    <div class="summary-text" id="summary-text"></div>
+    <div class="section-title">Key Risks Noted</div>
+    <ul class="clause-list" id="key-risks-list"></ul>
+  </div>
+
+  <div class="card hidden" id="rejected-card">
+    <div style="color: var(--red); font-weight: 600;">This contract was rejected during human review.</div>
+  </div>
+</div>
+
+<script>
+const API_BASE = "";
+let currentJobId = null;
+let pollTimer = null;
+
+const el = (id) => document.getElementById(id);
+
+el("analyze-btn").addEventListener("click", analyzeContract);
+el("approve-btn").addEventListener("click", () => submitDecision("approve"));
+el("reject-btn").addEventListener("click", () => submitDecision("reject"));
+el("reset-btn").addEventListener("click", resetUI);
+
+async function analyzeContract() {
+  const fileInput = el("file-input");
+  const errorBox = el("upload-error");
+  errorBox.classList.add("hidden");
+
+  if (!fileInput.files.length) {
+    errorBox.textContent = "Please choose a .pdf or .txt file first.";
+    errorBox.classList.remove("hidden");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", fileInput.files[0]);
+
+  el("analyze-btn").disabled = true;
+  el("analyze-btn").textContent = "Uploading...";
+
+  try {
+    const res = await fetch(`${API_BASE}/analyze`, { method: "POST", body: formData });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Request failed (${res.status})`);
+    }
+    const data = await res.json();
+    currentJobId = data.job_id;
+
+    el("status-card").classList.remove("hidden");
+    el("job-id-label").textContent = currentJobId;
+    setStatusBadge(data.status);
+
+    pollStatus();
+  } catch (e) {
+    errorBox.textContent = e.message;
+    errorBox.classList.remove("hidden");
+  } finally {
+    el("analyze-btn").disabled = false;
+    el("analyze-btn").textContent = "Analyze Contract";
+  }
+}
+
+async function pollStatus() {
+  if (!currentJobId) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/status/${currentJobId}`);
+    const data = await res.json();
+    setStatusBadge(data.status);
+
+    if (data.status === "pending_human_review") {
+      renderReview(data.result);
+      return; // stop polling, wait for human action
+    }
+
+    if (data.status === "completed") {
+      renderResult(data.result);
+      return;
+    }
+
+    if (data.status === "rejected") {
+      el("rejected-card").classList.remove("hidden");
+      return;
+    }
+
+    // still queued / processing -> keep polling
+    pollTimer = setTimeout(pollStatus, 2000);
+  } catch (e) {
+    pollTimer = setTimeout(pollStatus, 3000);
+  }
+}
+
+function setStatusBadge(status) {
+  const badge = el("status-badge");
+  badge.textContent = status.replace(/_/g, " ");
+  badge.className = "badge " + status;
+}
+
+function renderReview(result) {
+  const clausesList = el("clauses-list");
+  clausesList.innerHTML = "";
+
+  const clauses = result.clauses || {};
+  const flatClauses = [
+    ...(clauses.obligations || []).map(t => ({ label: "Obligation", text: t })),
+    ...(clauses.termination_conditions || []).map(t => ({ label: "Termination", text: t })),
+  ];
+  if (clauses.payment_terms) flatClauses.push({ label: "Payment", text: clauses.payment_terms });
+  if (clauses.duration) flatClauses.push({ label: "Duration", text: clauses.duration });
+
+  flatClauses.forEach(c => {
+    const li = document.createElement("li");
+    li.innerHTML = `<strong>${c.label}:</strong> ${escapeHtml(c.text)}`;
+    clausesList.appendChild(li);
+  });
+
+  const risksList = el("risks-list");
+  risksList.innerHTML = "";
+  const risks = (result.risks && result.risks.risks) || [];
+  risks.forEach(r => {
+    const div = document.createElement("div");
+    div.className = "risk-item " + (r.risk_level || "");
+    div.innerHTML = `
+      <span class="risk-level ${r.risk_level || ''}">${r.risk_level || 'unknown'}</span>
+      <div>${escapeHtml(r.clause || "")}</div>
+      <div class="risk-explanation">${escapeHtml(r.explanation || "")}</div>
+    `;
+    risksList.appendChild(div);
+  });
+
+  el("review-card").classList.remove("hidden");
+}
+
+function renderResult(result) {
+  const summary = result.summary || {};
+  el("summary-text").textContent = summary.summary || "(no summary available)";
+
+  const keyRisksList = el("key-risks-list");
+  keyRisksList.innerHTML = "";
+  (summary.key_risks_noted || []).forEach(r => {
+    const li = document.createElement("li");
+    li.textContent = r;
+    keyRisksList.appendChild(li);
+  });
+
+  el("review-card").classList.add("hidden");
+  el("result-card").classList.remove("hidden");
+}
+
+async function submitDecision(decision) {
+  el("approve-btn").disabled = true;
+  el("reject-btn").disabled = true;
+
+  try {
+    await fetch(`${API_BASE}/jobs/${currentJobId}/decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    });
+    el("review-card").classList.add("hidden");
+    setStatusBadge("processing");
+    pollStatus();
+  } finally {
+    el("approve-btn").disabled = false;
+    el("reject-btn").disabled = false;
+  }
+}
+
+function resetUI() {
+  currentJobId = null;
+  if (pollTimer) clearTimeout(pollTimer);
+  el("file-input").value = "";
+  el("status-card").classList.add("hidden");
+  el("review-card").classList.add("hidden");
+  el("result-card").classList.add("hidden");
+  el("rejected-card").classList.add("hidden");
+  el("upload-error").classList.add("hidden");
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>

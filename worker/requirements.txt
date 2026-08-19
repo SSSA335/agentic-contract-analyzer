@@ -1,0 +1,9 @@
+celery
+pika
+python-dotenv
+groq
+qdrant-client[fastembed]
+redis
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp
