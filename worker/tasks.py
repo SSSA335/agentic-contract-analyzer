@@ -35,7 +35,7 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 health_app = FastAPI()
 
 
-@health_app.get("/health")
+@health_app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok", "message": "Worker is running"}
 
